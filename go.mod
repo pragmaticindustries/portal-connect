@@ -1,6 +1,6 @@
 module github.com/pragmatic-industries/portal-connect
 
-go 1.15
+go 1.16
 
 require (
 	github.com/apache/plc4x/plc4go v0.0.0-20210902160604-d767dc9b9160
