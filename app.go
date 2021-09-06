@@ -14,8 +14,8 @@ import (
 )
 
 func main() {
-	pingPLC()
-	connectMQTT()
+	connectPlc()
+	//connectMQTT()
 }
 
 //define a function for the default message handler
@@ -23,9 +23,6 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("TOPIC: %s\n", msg.Topic())
 	fmt.Printf("MSG: %s\n", msg.Payload())
 }
-
-// PLC connection string
-var plcConStr = "modbus://192.168.23.30?unit-identifier=1"
 
 func connectMQTT() {
 	//create a ClientOptions struct setting the broker address, clientid, turn
@@ -66,7 +63,10 @@ func connectMQTT() {
 	c.Disconnect(250)
 }
 
-func pingPLC() {
+// PLC connection string
+var plcConStr = "s7://192.168.167.210/0/0"
+
+func connectPlc() {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -79,8 +79,7 @@ func pingPLC() {
 	transports.RegisterUdpTransport(driverManager)
 
 	// Register the Drivers
-	drivers.RegisterKnxDriver(driverManager)
-	drivers.RegisterModbusDriver(driverManager)
+	drivers.RegisterS7Driver(driverManager)
 
 	// Get a connection to a remote PLC
 	connectionRequestChanel := driverManager.GetConnection(plcConStr)
@@ -109,4 +108,38 @@ func pingPLC() {
 		fmt.Printf("Couldn't ping device: %s", pingResult.Err.Error())
 		return
 	}
+
+	if !connection.GetMetadata().CanRead() {
+		fmt.Printf("This connection doesn't support read operations")
+		return
+	}
+
+	// Prepare a read-request
+	readRequest, err := connection.ReadRequestBuilder().
+		AddQuery("motor-current", "%DB444.DBD8:REAL").
+		AddQuery("position", "%DB444.DBD0:REAL").
+		AddQuery("rand_val", "%DB444.DBD4:REAL").
+		Build()
+	if err != nil {
+		fmt.Printf("error preparing read-request: %s", connectionResult.Err.Error())
+		return
+	}
+
+	// Execute a read-request
+	readResponseChanel := readRequest.Execute()
+
+	// Wait for the response to finish
+	readRequestResult := <-readResponseChanel
+	if readRequestResult.Err != nil {
+		fmt.Printf("error executing read-request: %s", readRequestResult.Err.Error())
+		return
+	}
+
+	// Do something with the response
+	value1 := readRequestResult.Response.GetValue("motor-current")
+	value2 := readRequestResult.Response.GetValue("position")
+	value3 := readRequestResult.Response.GetValue("rand_val")
+	fmt.Printf("\n\nmotor-current: %f\n", value1.GetFloat32())
+	fmt.Printf("\n\nRposition: %f\n", value2.GetFloat32())
+	fmt.Printf("\n\nrand_val: %f\n", value3.GetFloat32())
 }
