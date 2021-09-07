@@ -8,14 +8,14 @@ import (
 	"github.com/apache/plc4x/plc4go/pkg/plc4go/transports"
 
 	"os"
-	"time"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
 func main() {
-	connectPlc()
-	//connectMQTT()
+	c := connectMQTT()
+	defer disconnectMQTT(c)
+	readPlc(c)
 }
 
 //define a function for the default message handler
@@ -24,11 +24,11 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("MSG: %s\n", msg.Payload())
 }
 
-func connectMQTT() {
+func connectMQTT() MQTT.Client {
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
 	opts := MQTT.NewClientOptions().AddBroker("tcp://mqtt.eclipseprojects.io:1883")
-	opts.SetClientID("go-simple")
+	opts.SetClientID("portal-connect")
 	opts.SetDefaultPublishHandler(f)
 
 	//create and start a client using the above ClientOptions
@@ -37,36 +37,35 @@ func connectMQTT() {
 		panic(token.Error())
 	}
 
-	//subscribe to the topic /go-mqtt/sample and request messages to be delivered
+	//subscribe to the topic /portal-test/sample and request messages to be delivered
 	//at a maximum qos of zero, wait for the receipt to confirm the subscription
-	if token := c.Subscribe("go-mqtt/sample", 0, nil); token.Wait() && token.Error() != nil {
+	if token := c.Subscribe("portal-test/sample", 0, nil); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
 
-	//Publish 5 messages to /go-mqtt/sample at qos 1 and wait for the receipt
-	//from the server after sending each message
-	for i := 0; i < 5; i++ {
-		text := fmt.Sprintf("this is msg #%d!", i)
-		token := c.Publish("go-mqtt/sample", 0, false, text)
-		token.Wait()
-	}
+	return c
+}
 
-	time.Sleep(3 * time.Second)
-
-	//unsubscribe from /go-mqtt/sample
-	if token := c.Unsubscribe("go-mqtt/sample"); token.Wait() && token.Error() != nil {
+func disconnectMQTT(c MQTT.Client) {
+	//unsubscribe from /portal-test/sample
+	if token := c.Unsubscribe("portal-test/sample"); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
-
 	c.Disconnect(250)
+}
+
+func publishMQTT(c MQTT.Client, label string, value string) {
+	text := fmt.Sprintf("key: %s, value: %s", label, value)
+	token := c.Publish("portal-test/sample", 0, false, text)
+	token.Wait()
 }
 
 // PLC connection string
 var plcConStr = "s7://192.168.167.210/0/0"
 
-func connectPlc() {
+func readPlc(c MQTT.Client) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -139,7 +138,7 @@ func connectPlc() {
 	value1 := readRequestResult.Response.GetValue("motor-current")
 	value2 := readRequestResult.Response.GetValue("position")
 	value3 := readRequestResult.Response.GetValue("rand_val")
-	fmt.Printf("\n\nmotor-current: %f\n", value1.GetFloat32())
-	fmt.Printf("\n\nRposition: %f\n", value2.GetFloat32())
-	fmt.Printf("\n\nrand_val: %f\n", value3.GetFloat32())
+	publishMQTT(c, "motor-current", value1.GetString())
+	publishMQTT(c, "position:", value2.GetString())
+	publishMQTT(c, "rand_val", value3.GetString())
 }
