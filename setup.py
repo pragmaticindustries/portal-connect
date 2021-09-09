@@ -5,8 +5,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 
-dotenv_path = Path('../.env')
-load_dotenv(dotenv_path=dotenv_path)
+load_dotenv()
 
 devicePassword = os.getenv('HONODEVICEPASSWORD')
 registryIp = os.getenv('HONOREGISTRYIP')
@@ -15,22 +14,23 @@ mqttAdapterIp = os.getenv('HONOMQTTIP') #mqtt Port 1883
 tenant = requests.post(f'http://{registryIp}:28080/v1/tenants').json()
 tenantId = tenant["id"]
 
-f = open("../.env", "a")
+f = open("./.env", "a")
 
 print(f'Registered tenant {tenantId}')
 
-f.write("tenant:")
+f.write('\n')
+f.write("HONOTENANT=")
 f.write(tenantId)
+f.write('\n')
 
 # Add Device to Tenant
 device = requests.post(f'http://{registryIp}:28080/v1/devices/{tenantId}').json()
 deviceId = device["id"]
 print(f'Registered device {deviceId}')
 
-f.write(", device:")
+f.write("HONODEVICE=")
 f.write(deviceId)
-f.write(", password:")
-f.write(devicePassword)
+f.write('\n')
 f.close()
 
 code = requests.put(f'http://{registryIp}:28080/v1/credentials/{tenantId}/{deviceId}',
