@@ -1,0 +1,28 @@
+on: push
+name: Deploy
+jobs:
+  buildAndDeploy:
+    name: build and push job
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - name: build image
+      uses: actions/docker/cli
+      with:
+        args: build -t portal-connect .
+    - name: tag image github
+      uses: actions/docker/tag
+      with:
+        args: portal-connect ghcr.io/pragmaticindustries/portal-connect --no-ref
+    - name: docker login
+      uses: actions/docker/login@master
+      env:
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        DOCKER_REGISTRY_URL: ${{ secrets.DOCKER_REGISTRY_URL }}
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+    - name: push to Github
+      uses: actions/docker/cli
+      env:
+        APPLICATION_NAME: portal-connect
+      with:
+        args: '"push ghcr.io/pragmaticindustries/portal-connect"'
