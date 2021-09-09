@@ -7,21 +7,21 @@ jobs:
     steps:
     - uses: actions/checkout@master
     - name: build image
-      uses: actions/docker/cli@master
+      uses: docker
       with:
         args: build -t portal-connect .
     - name: tag image github
-      uses: actions/docker/tag@master
+      uses: docker
       with:
         args: portal-connect ghcr.io/pragmaticindustries/portal-connect --no-ref
     - name: docker login
-      uses: actions/docker/login@master
+      uses: docker
       env:
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         DOCKER_REGISTRY_URL: ${{ secrets.DOCKER_REGISTRY_URL }}
         DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
     - name: push to Github
-      uses: actions/docker/cli@master
+      uses: docker
       env:
         APPLICATION_NAME: portal-connect
       with:
