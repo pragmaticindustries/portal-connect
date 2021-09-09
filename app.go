@@ -10,12 +10,18 @@ import (
 	"os"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
+
+	godotenv "github.com/joho/godotenv"
 )
 
 func main() {
+	godotenv.Load()
+
 	c := connectMQTT()
 	defer disconnectMQTT(c)
-	readPlc(c)
+
+	plcConStr := os.Getenv("PLCURL")
+	readPlc(c, plcConStr)
 }
 
 //define a function for the default message handler
@@ -62,10 +68,7 @@ func publishMQTT(c MQTT.Client, label string, value string) {
 	token.Wait()
 }
 
-// PLC connection string
-var plcConStr = "s7://192.168.167.210/0/0"
-
-func readPlc(c MQTT.Client) {
+func readPlc(c MQTT.Client, plcConStr string) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
