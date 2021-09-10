@@ -18,7 +18,7 @@ func main() {
 	godotenv.Load()
 
 	c := connectMQTT()
-	defer disconnectMQTT(c)
+	//defer disconnectMQTT(c)
 
 	plcConStr := os.Getenv("PLCURL")
 	readPlc(c, plcConStr)
@@ -33,11 +33,13 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 func connectMQTT() MQTT.Client {
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
-	opts := MQTT.NewClientOptions().AddBroker("tcp://mqtt.eclipseprojects.io:1883")
+	opts := MQTT.NewClientOptions().AddBroker(fmt.Sprintf("tcp://%s:1883", os.Getenv("HONOMQTTIP")))
 	opts.SetClientID("portal-connect")
+	user := fmt.Sprintf("%s@%s", os.Getenv("HONODEVICE"), os.Getenv("HONOTENANT"))
+	opts.SetUsername(user)
+	opts.SetPassword(os.Getenv("HONODEVICEPASSWORD"))
 	opts.SetDefaultPublishHandler(f)
 
-	//create and start a client using the above ClientOptions
 	c := MQTT.NewClient(opts)
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
@@ -45,7 +47,7 @@ func connectMQTT() MQTT.Client {
 
 	//subscribe to the topic /portal-test/sample and request messages to be delivered
 	//at a maximum qos of zero, wait for the receipt to confirm the subscription
-	if token := c.Subscribe("portal-test/sample", 0, nil); token.Wait() && token.Error() != nil {
+	if token := c.Subscribe(fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")), 0, commandHandler); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
@@ -53,9 +55,12 @@ func connectMQTT() MQTT.Client {
 	return c
 }
 
+func commandHandler(client MQTT.Client, msg MQTT.Message) {
+	fmt.Printf("* [%s] %s\n", msg.Topic(), string(msg.Payload()))
+}
+
 func disconnectMQTT(c MQTT.Client) {
-	//unsubscribe from /portal-test/sample
-	if token := c.Unsubscribe("portal-test/sample"); token.Wait() && token.Error() != nil {
+	if token := c.Unsubscribe(fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE"))); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
@@ -64,7 +69,7 @@ func disconnectMQTT(c MQTT.Client) {
 
 func publishMQTT(c MQTT.Client, label string, value string) {
 	text := fmt.Sprintf("key: %s, value: %s", label, value)
-	token := c.Publish("portal-test/sample", 0, false, text)
+	token := c.Publish(fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")), 0, false, text)
 	token.Wait()
 }
 
