@@ -5,6 +5,7 @@ import (
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
 	"github.com/apache/plc4x/plc4go/pkg/plc4go/drivers"
+	"github.com/apache/plc4x/plc4go/pkg/plc4go/logging"
 	"github.com/apache/plc4x/plc4go/pkg/plc4go/transports"
 
 	"os"
@@ -20,11 +21,18 @@ func main() {
 	c := connectMQTT()
 	//defer disconnectMQTT(c)
 
-	plcConStr := os.Getenv("PLCURL")
-	readPlc(c, plcConStr)
+	//plcConStr := os.Getenv("PLCURL")
+	//readPlc(c, plcConStr)
+
+	// Make a channel to receive messages into infinite loop.
+	forever := make(chan bool)
+
+	go publishMQTT(c, fmt.Sprintf("{\"host\": \"s7://192.168.167.210/0/0\",\"plcField\":\"%%DB444:6.0:REAL\", \"reply_to\":\"command_response/%s/%s\"}", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")))
+
+	<-forever
+
 }
 
-//define a function for the default message handler
 var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("TOPIC: %s\n", msg.Topic())
 	fmt.Printf("MSG: %s\n", msg.Payload())
@@ -38,21 +46,49 @@ func connectMQTT() MQTT.Client {
 	user := fmt.Sprintf("%s@%s", os.Getenv("HONODEVICE"), os.Getenv("HONOTENANT"))
 	opts.SetUsername(user)
 	opts.SetPassword(os.Getenv("HONODEVICEPASSWORD"))
-	opts.SetDefaultPublishHandler(f)
 
 	c := MQTT.NewClient(opts)
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
 
-	//subscribe to the topic /portal-test/sample and request messages to be delivered
-	//at a maximum qos of zero, wait for the receipt to confirm the subscription
-	if token := c.Subscribe(fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")), 0, commandHandler); token.Wait() && token.Error() != nil {
+	//choke := make(chan [2]string)
+
+	/* opts.SetDefaultPublishHandler(func(client MQTT.Client, msg MQTT.Message) {
+		fmt.Printf("RECEIVED TOPIC: %s MESSAGE: %s\n", msg.Topic(), msg.Payload())
+		choke <- [2]string{msg.Topic(), string(msg.Payload())}
+	}) */
+
+	opts.SetDefaultPublishHandler(f)
+
+	if token := c.Subscribe(fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")), 0, nil); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
 
+	if token := c.Subscribe(fmt.Sprintf("command_response/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")), 0, nil); token.Wait() && token.Error() != nil {
+		fmt.Println(token.Error())
+		os.Exit(1)
+	}
+
+	if token := c.Subscribe(fmt.Sprintf("telemetry/%s", os.Getenv("HONOTENANT")), 0, nil); token.Wait() && token.Error() != nil {
+		fmt.Println(token.Error())
+		os.Exit(1)
+	}
+
+	if token := c.Subscribe(fmt.Sprintf("event/%s", os.Getenv("HONOTENANT")), 0, nil); token.Wait() && token.Error() != nil {
+		fmt.Println(token.Error())
+		os.Exit(1)
+	}
+
+	//go subscribeCommand(choke)
+
 	return c
+}
+
+func subscribeCommand(choke chan [2]string) {
+	incoming := <-choke
+	fmt.Printf("RECEIVED TOPIC: %s MESSAGE: %s\n", incoming[0], incoming[1])
 }
 
 func commandHandler(client MQTT.Client, msg MQTT.Message) {
@@ -67,9 +103,11 @@ func disconnectMQTT(c MQTT.Client) {
 	c.Disconnect(250)
 }
 
-func publishMQTT(c MQTT.Client, label string, value string) {
-	text := fmt.Sprintf("key: %s, value: %s", label, value)
-	token := c.Publish(fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")), 0, false, text)
+func publishMQTT(c MQTT.Client, msg string) {
+	// send commands
+	ch := fmt.Sprintf("command/%s/%s", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE"))
+	fmt.Println(ch)
+	token := c.Publish(ch, 0, false, msg)
 	token.Wait()
 }
 
@@ -77,6 +115,8 @@ func readPlc(c MQTT.Client, plcConStr string) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+	logging.WarnLevel()
 
 	// Create a new instance of the PlcDriverManager
 	driverManager := plc4go.NewPlcDriverManager()
@@ -146,7 +186,7 @@ func readPlc(c MQTT.Client, plcConStr string) {
 	value1 := readRequestResult.Response.GetValue("motor-current")
 	value2 := readRequestResult.Response.GetValue("position")
 	value3 := readRequestResult.Response.GetValue("rand_val")
-	publishMQTT(c, "motor-current", value1.GetString())
-	publishMQTT(c, "position:", value2.GetString())
-	publishMQTT(c, "rand_val", value3.GetString())
+	publishMQTT(c, value1.GetString())
+	publishMQTT(c, value2.GetString())
+	publishMQTT(c, value3.GetString())
 }
