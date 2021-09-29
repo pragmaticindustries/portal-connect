@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
 	"github.com/apache/plc4x/plc4go/pkg/plc4go/drivers"
@@ -25,11 +26,12 @@ func main() {
 	//readPlc(c, plcConStr)
 
 	// Make a channel to receive messages into infinite loop.
-	forever := make(chan bool)
 
 	go publishMQTT(c, fmt.Sprintf("{\"host\": \"s7://192.168.167.210/0/0\",\"plcField\":\"%%DB444:6.0:REAL\", \"reply_to\":\"command_response/%s/%s\"}", os.Getenv("HONOTENANT"), os.Getenv("HONODEVICE")))
 
-	<-forever
+	runtime.Goexit()
+
+	fmt.Println("Exit")
 
 }
 
