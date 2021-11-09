@@ -113,12 +113,24 @@ func readPlc(c MQTT.Client) {
 		return
 	}
 
+	parameters := map[string]string{
+		"motor-current": "%DB444.DBD8:REAL",
+		"position":      "%DB444.DBD0:REAL",
+		"rand_val":      "%DB444.DBD4:REAL",
+	}
+
+	performRequest(c, connection, parameters, connectionResult)
+}
+
+func performRequest(c MQTT.Client, connection plc4go.PlcConnection, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
 	// Prepare a read-request
-	readRequest, err := connection.ReadRequestBuilder().
-		AddQuery("motor-current", "%DB444.DBD8:REAL").
-		AddQuery("position", "%DB444.DBD0:REAL").
-		AddQuery("rand_val", "%DB444.DBD4:REAL").
-		Build()
+	builder := connection.ReadRequestBuilder()
+
+	for key, value := range parameters {
+		builder.AddQuery(key, value)
+	}
+
+	readRequest, err := builder.Build()
 	if err != nil {
 		fmt.Printf("error preparing read-request: %s", connectionResult.Err.Error())
 		return
@@ -135,10 +147,8 @@ func readPlc(c MQTT.Client) {
 	}
 
 	// Do something with the response
-	value1 := readRequestResult.Response.GetValue("motor-current")
-	value2 := readRequestResult.Response.GetValue("position")
-	value3 := readRequestResult.Response.GetValue("rand_val")
-	publishMQTT(c, "motor-current", value1.GetString())
-	publishMQTT(c, "position:", value2.GetString())
-	publishMQTT(c, "rand_val", value3.GetString())
+	for key := range parameters {
+		val := readRequestResult.Response.GetValue(key)
+		publishMQTT(c, "motor-current", val.GetString())
+	}
 }
