@@ -163,6 +163,7 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 type DefaultPool struct {
 	Pool
 	connectionString string
+	driverManager    plc4go.PlcDriverManager
 	connection       plc4go.PlcConnection
 }
 
@@ -196,15 +197,16 @@ func NewPool(plcConStr string) (Pool, error) {
 	// If all was ok, get the connection instance
 	connection := connectionResult.Connection
 
-	return &DefaultPool{connectionString: plcConStr, connection: connection}, nil
+	return &DefaultPool{driverManager: driverManager, connectionString: plcConStr, connection: connection}, nil
 }
 
 func (p *DefaultPool) Get() plc4go.PlcConnection {
+	fmt.Println("Connected: ", p.connection.IsConnected())
 	return p.connection
 }
 
 func performRequest(c MQTT.Client, pool Pool, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
-	fmt.Printf("Doing a Request now...")
+	fmt.Println("Doing a Request now...")
 	var connection plc4go.PlcConnection
 
 	connection = pool.Get()
