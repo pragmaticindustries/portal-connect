@@ -148,8 +148,10 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 
 	s := gocron.NewScheduler(time.UTC)
 
-	// Shedule the Event
-	_, err := s.Every(seconds).Seconds().Do(performRequest, c, connection, parameters, connectionResult)
+	p, _ := NewPool(plcConStr)
+
+	// Schedule the Event
+	_, err := s.Every(seconds).Seconds().Do(performRequest, c, p, parameters, connectionResult)
 	if err != nil {
 		return
 	}
@@ -158,8 +160,55 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 	s.StartBlocking()
 }
 
-func performRequest(c MQTT.Client, connection plc4go.PlcConnection, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
+type DefaultPool struct {
+	Pool
+	connectionString string
+	connection       plc4go.PlcConnection
+}
+
+type Pool interface {
+	Get() plc4go.PlcConnection
+}
+
+func NewPool(plcConStr string) (Pool, error) {
+	// Create a new instance of the PlcDriverManager
+	driverManager := plc4go.NewPlcDriverManager()
+
+	// Register the Transports
+	transports.RegisterTcpTransport(driverManager)
+	transports.RegisterUdpTransport(driverManager)
+
+	// Register the Drivers
+	drivers.RegisterS7Driver(driverManager)
+
+	// Get a connection to a remote PLC
+	connectionRequestChanel := driverManager.GetConnection(plcConStr)
+
+	// Wait for the driver to connect (or not)
+	connectionResult := <-connectionRequestChanel
+
+	// Check if something went wrong
+	if connectionResult.Err != nil {
+		fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
+		return nil, connectionResult.Err
+	}
+
+	// If all was ok, get the connection instance
+	connection := connectionResult.Connection
+
+	return &DefaultPool{connectionString: plcConStr, connection: connection}, nil
+}
+
+func (p *DefaultPool) Get() plc4go.PlcConnection {
+	return p.connection
+}
+
+func performRequest(c MQTT.Client, pool Pool, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
 	fmt.Printf("Doing a Request now...")
+	var connection plc4go.PlcConnection
+
+	connection = pool.Get()
+
 	// Prepare a read-request
 	builder := connection.ReadRequestBuilder()
 
