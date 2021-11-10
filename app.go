@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"time"
 
@@ -58,21 +57,36 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("MSG: %s\n", msg.Payload())
 }
 
+type LOGGER struct{}
+
+func (L LOGGER) Println(v ...interface{}) {
+	fmt.Println(v)
+}
+
+func (L LOGGER) Printf(format string, v ...interface{}) {
+	fmt.Printf(format, v)
+}
+
 func connectMQTT(host string, username string, password string, device string, tenant string) MQTT.Client {
+	// Enable Logging
+	MQTT.ERROR = LOGGER{}
+	MQTT.CRITICAL = LOGGER{}
+	MQTT.WARN = LOGGER{}
+	MQTT.DEBUG = LOGGER{}
+
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
 	opts := MQTT.NewClientOptions().AddBroker(host)
-	clientId := "portal-connect-" + strconv.Itoa(rand.Int())
+	clientId := "portal-connect"
 	fmt.Println("Client ID:", clientId)
 	opts.SetClientID(clientId)
-	//provider := MQTT.CredentialsProvider("ff77512b-d1aa-42fa-bf7e-fac1f4051838@31f18a77-2466-460c-8da8-5fadd658ca74","")
-	//opts.SetCredentialsProvider(provider)
-	opts.SetDefaultPublishHandler(f)
 
 	if username != "" {
 		opts.SetUsername(username)
 		opts.SetPassword(password)
 	}
+
+	opts.SetDefaultPublishHandler(f)
 
 	//create and start a client using the above ClientOptions
 	c := MQTT.NewClient(opts)
