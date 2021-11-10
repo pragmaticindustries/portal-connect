@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"os"
 
 	"github.com/go-co-op/gocron"
+	godotenv "github.com/joho/godotenv"
 
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
@@ -26,11 +28,15 @@ func getenv(key, fallback string) string {
 }
 
 func main() {
+	godotenv.Load()
+
 	// PLC connection string
 	var plcConStr = getenv("PLC_ADDRESS", "s7://192.168.167.210/0/0")
 	var host = getenv("MQTT_HOST", "tcp://mqtt.eclipseprojects.io:1883")
-	var username = getenv("MQTT_USER", "")
 	var password = getenv("MQTT_PASSWORD", "")
+	var device = getenv("DEVICE", "")
+	var tenant = getenv("TENANT", "")
+	var username = fmt.Sprintf("%s@%s", device, tenant)
 	var frequencySeconds, _ = strconv.Atoi(getenv("FREQUENCY", "5"))
 	var parametersString = getenv("PARAMETERS", "{\"motor-current\": \"%DB444.DBD8:REAL\", \"position\": \"%DB444.DBD0:REAL\", \"rand_val\": \"%DB444.DBD4:REAL\"}")
 
@@ -41,8 +47,8 @@ func main() {
 		return
 	}
 
-	c := connectMQTT(host, username, password)
-	defer disconnectMQTT(c)
+	c := connectMQTT(host, username, password, device, tenant)
+	defer disconnectMQTT(c, device, tenant)
 	readPlc(plcConStr, frequencySeconds, parameters, c)
 }
 
@@ -52,15 +58,15 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("MSG: %s\n", msg.Payload())
 }
 
-func connectMQTT(host string, username string, password string) MQTT.Client {
+func connectMQTT(host string, username string, password string, device string, tenant string) MQTT.Client {
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
-	opts := MQTT.NewClientOptions().AddBroker("tcp://85.215.240.139:1883")
-	opts.SetClientID("portal-connect")
-	provider := MQTT.CredentialsProvider("ff77512b-d1aa-42fa-bf7e-fac1f4051838@31f18a77-2466-460c-8da8-5fadd658ca74", "")
-	opts.SetCredentialsProvider(provider)
-	opts.SetUsername("ff77512b-d1aa-42fa-bf7e-fac1f4051838@31f18a77-2466-460c-8da8-5fadd658ca74")
-	opts.SetPassword("")
+	opts := MQTT.NewClientOptions().AddBroker(host)
+	clientId := "portal-connect-" + strconv.Itoa(rand.Int())
+	fmt.Println("Client ID:", clientId)
+	opts.SetClientID(clientId)
+	//provider := MQTT.CredentialsProvider("ff77512b-d1aa-42fa-bf7e-fac1f4051838@31f18a77-2466-460c-8da8-5fadd658ca74","")
+	//opts.SetCredentialsProvider(provider)
 	opts.SetDefaultPublishHandler(f)
 
 	if username != "" {
@@ -76,7 +82,7 @@ func connectMQTT(host string, username string, password string) MQTT.Client {
 
 	//subscribe to the topic /portal-test/sample and request messages to be delivered
 	//at a maximum qos of zero, wait for the receipt to confirm the subscription
-	if token := c.Subscribe("command/31f18a77-2466-460c-8da8-5fadd658ca74/ff77512b-d1aa-42fa-bf7e-fac1f4051838/req/#", 0, nil); token.Wait() && token.Error() != nil {
+	if token := c.Subscribe(fmt.Sprintf("command/%s/%s/req/#", tenant, device), 0, nil); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
@@ -84,9 +90,9 @@ func connectMQTT(host string, username string, password string) MQTT.Client {
 	return c
 }
 
-func disconnectMQTT(c MQTT.Client) {
+func disconnectMQTT(c MQTT.Client, device string, tenant string) {
 	//unsubscribe from /portal-test/sample
-	if token := c.Unsubscribe("command/31f18a77-2466-460c-8da8-5fadd658ca74/ff77512b-d1aa-42fa-bf7e-fac1f4051838/req/#"); token.Wait() && token.Error() != nil {
+	if token := c.Unsubscribe(fmt.Sprintf("command/%s/%s/req/#", tenant, device)); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
@@ -95,7 +101,7 @@ func disconnectMQTT(c MQTT.Client) {
 
 func publishMQTT(c MQTT.Client, label string, value string) {
 	text := fmt.Sprintf("key: %s, value: %s", label, value)
-	token := c.Publish("telemetry", 0, false, text)
+	token := c.Publish(fmt.Sprintf("telemetry/%s", getenv("TENANT", "")), 0, false, text)
 	token.Wait()
 }
 
