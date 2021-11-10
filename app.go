@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
 	"github.com/apache/plc4x/plc4go/pkg/plc4go/drivers"
@@ -9,13 +10,26 @@ import (
 
 	"os"
 
+	"github.com/go-co-op/gocron"
+
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
+func getenv(key, fallback string) string {
+	value := os.Getenv(key)
+	if len(value) == 0 {
+		return fallback
+	}
+	return value
+}
+
 func main() {
+	// PLC connection string
+	var plcConStr = getenv("PLC_ADDRESS", "s7://192.168.167.210/0/0")
+
 	c := connectMQTT()
 	defer disconnectMQTT(c)
-	readPlc(c)
+	readPlc(plcConStr, c)
 }
 
 //define a function for the default message handler
@@ -62,10 +76,7 @@ func publishMQTT(c MQTT.Client, label string, value string) {
 	token.Wait()
 }
 
-// PLC connection string
-var plcConStr = "s7://192.168.167.210/0/0"
-
-func readPlc(c MQTT.Client) {
+func readPlc(plcConStr string, c MQTT.Client) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -119,10 +130,17 @@ func readPlc(c MQTT.Client) {
 		"rand_val":      "%DB444.DBD4:REAL",
 	}
 
-	performRequest(c, connection, parameters, connectionResult)
+	s := gocron.NewScheduler(time.UTC)
+
+	// Shedule the Event
+	s.Every(5).Seconds().Do(performRequest, c, connection, parameters, connectionResult)
+
+	// Run the main "event loop"
+	s.StartBlocking()
 }
 
 func performRequest(c MQTT.Client, connection plc4go.PlcConnection, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
+	fmt.Printf("Doing a Request now...")
 	// Prepare a read-request
 	builder := connection.ReadRequestBuilder()
 

@@ -40,7 +40,7 @@ func Test_Scheduler(t *testing.T) {
 }
 
 func Test_connectMQTT(t *testing.T) {
-	os.Setenv("MQTT_USER", "julian")
+	err := os.Setenv("MQTT_USER", "julian")
 	user := os.Getenv("MQTT_USER")
 
 	fmt.Println("User: " + user)
@@ -49,7 +49,7 @@ func Test_connectMQTT(t *testing.T) {
 
 	var book Book
 
-	err := json.Unmarshal([]byte(jsonString), &book)
+	err = json.Unmarshal([]byte(jsonString), &book)
 
 	if err != nil {
 		t.Errorf("connectMQTT()")
