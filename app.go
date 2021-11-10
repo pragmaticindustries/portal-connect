@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/rand"
+	"strconv"
 	"time"
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
@@ -26,10 +29,22 @@ func getenv(key, fallback string) string {
 func main() {
 	// PLC connection string
 	var plcConStr = getenv("PLC_ADDRESS", "s7://192.168.167.210/0/0")
+	var host = getenv("MQTT_HOST", "tcp://mqtt.eclipseprojects.io:1883")
+	var username = getenv("MQTT_USER", "")
+	var password = getenv("MQTT_PASSWORD", "")
+	var frequencySeconds, _ = strconv.Atoi(getenv("FREQUENCY", "5"))
+	var parametersString = getenv("PARAMETERS", "{\"motor-current\": \"%DB444.DBD8:REAL\", \"position\": \"%DB444.DBD0:REAL\", \"rand_val\": \"%DB444.DBD4:REAL\"}")
 
-	c := connectMQTT()
+	var parameters map[string]string
+
+	err := json.Unmarshal([]byte(parametersString), &parameters)
+	if err != nil {
+		return
+	}
+
+	c := connectMQTT(host, username, password)
 	defer disconnectMQTT(c)
-	readPlc(plcConStr, c)
+	readPlc(plcConStr, frequencySeconds, parameters, c)
 }
 
 //define a function for the default message handler
@@ -38,12 +53,19 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("MSG: %s\n", msg.Payload())
 }
 
-func connectMQTT() MQTT.Client {
+func connectMQTT(host string, username string, password string) MQTT.Client {
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
-	opts := MQTT.NewClientOptions().AddBroker("tcp://mqtt.eclipseprojects.io:1883")
-	opts.SetClientID("portal-connect")
+	opts := MQTT.NewClientOptions().AddBroker(host)
+	clientId := "portal-connect-" + strconv.Itoa(rand.Int())
+	fmt.Println("Client ID:", clientId)
+	opts.SetClientID(clientId)
 	opts.SetDefaultPublishHandler(f)
+
+	if username != "" {
+		opts.SetUsername(username)
+		opts.SetPassword(password)
+	}
 
 	//create and start a client using the above ClientOptions
 	c := MQTT.NewClient(opts)
@@ -76,7 +98,7 @@ func publishMQTT(c MQTT.Client, label string, value string) {
 	token.Wait()
 }
 
-func readPlc(plcConStr string, c MQTT.Client) {
+func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT.Client) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -124,16 +146,13 @@ func readPlc(plcConStr string, c MQTT.Client) {
 		return
 	}
 
-	parameters := map[string]string{
-		"motor-current": "%DB444.DBD8:REAL",
-		"position":      "%DB444.DBD0:REAL",
-		"rand_val":      "%DB444.DBD4:REAL",
-	}
-
 	s := gocron.NewScheduler(time.UTC)
 
 	// Shedule the Event
-	s.Every(5).Seconds().Do(performRequest, c, connection, parameters, connectionResult)
+	_, err := s.Every(seconds).Seconds().Do(performRequest, c, connection, parameters, connectionResult)
+	if err != nil {
+		return
+	}
 
 	// Run the main "event loop"
 	s.StartBlocking()
