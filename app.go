@@ -184,7 +184,7 @@ type Pool interface {
 	Reconnect() error
 }
 
-func (p DefaultPool) Reconnect() error {
+func (p *DefaultPool) Reconnect() error {
 	// Close
 	closeChan := p.connection.Close()
 
