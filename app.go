@@ -156,8 +156,20 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 		return
 	}
 
+	// DO a regular reconnect
+	_, err = s.Every(1).Minutes().Do(performReconnect, p)
+
 	// Run the main "event loop"
 	s.StartBlocking()
+}
+
+func performReconnect(p Pool) {
+	fmt.Println("I will just reset the connection now!")
+	err := p.Reconnect()
+	if err != nil {
+		fmt.Println("Issue while reconnecting...")
+		return
+	}
 }
 
 type DefaultPool struct {
@@ -169,6 +181,33 @@ type DefaultPool struct {
 
 type Pool interface {
 	Get() plc4go.PlcConnection
+	Reconnect() error
+}
+
+func (p DefaultPool) Reconnect() error {
+	// Close
+	closeChan := p.connection.Close()
+
+	// Wait to close
+	<-closeChan
+
+	// Get a connection to a remote PLC
+	connectionRequestChanel := p.driverManager.GetConnection(p.connectionString)
+
+	// Wait for the driver to connect (or not)
+	connectionResult := <-connectionRequestChanel
+
+	// Check if something went wrong
+	if connectionResult.Err != nil {
+		fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
+		return connectionResult.Err
+	}
+
+	// If all was ok, get the connection instance
+	connection := connectionResult.Connection
+	p.connection = connection
+
+	return nil
 }
 
 func NewPool(plcConStr string) (Pool, error) {
