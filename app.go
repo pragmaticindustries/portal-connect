@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/rand"
+	"strconv"
+	"time"
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
 	"github.com/apache/plc4x/plc4go/pkg/plc4go/drivers"
@@ -9,13 +13,38 @@ import (
 
 	"os"
 
+	"github.com/go-co-op/gocron"
+
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
+func getenv(key, fallback string) string {
+	value := os.Getenv(key)
+	if len(value) == 0 {
+		return fallback
+	}
+	return value
+}
+
 func main() {
-	c := connectMQTT()
+	// PLC connection string
+	var plcConStr = getenv("PLC_ADDRESS", "s7://192.168.167.210/0/0")
+	var host = getenv("MQTT_HOST", "tcp://mqtt.eclipseprojects.io:1883")
+	var username = getenv("MQTT_USER", "")
+	var password = getenv("MQTT_PASSWORD", "")
+	var frequencySeconds, _ = strconv.Atoi(getenv("FREQUENCY", "5"))
+	var parametersString = getenv("PARAMETERS", "{\"motor-current\": \"%DB444.DBD8:REAL\", \"position\": \"%DB444.DBD0:REAL\", \"rand_val\": \"%DB444.DBD4:REAL\"}")
+
+	var parameters map[string]string
+
+	err := json.Unmarshal([]byte(parametersString), &parameters)
+	if err != nil {
+		return
+	}
+
+	c := connectMQTT(host, username, password)
 	defer disconnectMQTT(c)
-	readPlc(c)
+	readPlc(plcConStr, frequencySeconds, parameters, c)
 }
 
 //define a function for the default message handler
@@ -24,12 +53,19 @@ var f MQTT.MessageHandler = func(client MQTT.Client, msg MQTT.Message) {
 	fmt.Printf("MSG: %s\n", msg.Payload())
 }
 
-func connectMQTT() MQTT.Client {
+func connectMQTT(host string, username string, password string) MQTT.Client {
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
-	opts := MQTT.NewClientOptions().AddBroker("tcp://mqtt.eclipseprojects.io:1883")
-	opts.SetClientID("portal-connect")
+	opts := MQTT.NewClientOptions().AddBroker(host)
+	clientId := "portal-connect-" + strconv.Itoa(rand.Int())
+	fmt.Println("Client ID:", clientId)
+	opts.SetClientID(clientId)
 	opts.SetDefaultPublishHandler(f)
+
+	if username != "" {
+		opts.SetUsername(username)
+		opts.SetPassword(password)
+	}
 
 	//create and start a client using the above ClientOptions
 	c := MQTT.NewClient(opts)
@@ -62,10 +98,7 @@ func publishMQTT(c MQTT.Client, label string, value string) {
 	token.Wait()
 }
 
-// PLC connection string
-var plcConStr = "s7://192.168.167.210/0/0"
-
-func readPlc(c MQTT.Client) {
+func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT.Client) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -113,12 +146,118 @@ func readPlc(c MQTT.Client) {
 		return
 	}
 
+	s := gocron.NewScheduler(time.UTC)
+
+	p, _ := NewPool(plcConStr)
+
+	// Schedule the Event
+	_, err := s.Every(seconds).Seconds().Do(performRequest, c, p, parameters, connectionResult)
+	if err != nil {
+		return
+	}
+
+	// DO a regular reconnect
+	_, err = s.Every(1).Minutes().Do(performReconnect, p)
+
+	// Run the main "event loop"
+	s.StartBlocking()
+}
+
+func performReconnect(p Pool) {
+	fmt.Println("I will just reset the connection now!")
+	err := p.Reconnect()
+	if err != nil {
+		fmt.Println("Issue while reconnecting...")
+		return
+	}
+}
+
+type DefaultPool struct {
+	Pool
+	connectionString string
+	driverManager    plc4go.PlcDriverManager
+	connection       plc4go.PlcConnection
+}
+
+type Pool interface {
+	Get() plc4go.PlcConnection
+	Reconnect() error
+}
+
+func (p *DefaultPool) Reconnect() error {
+	// Close
+	closeChan := p.connection.Close()
+
+	// Wait to close
+	<-closeChan
+
+	// Get a connection to a remote PLC
+	connectionRequestChanel := p.driverManager.GetConnection(p.connectionString)
+
+	// Wait for the driver to connect (or not)
+	connectionResult := <-connectionRequestChanel
+
+	// Check if something went wrong
+	if connectionResult.Err != nil {
+		fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
+		return connectionResult.Err
+	}
+
+	// If all was ok, get the connection instance
+	connection := connectionResult.Connection
+	p.connection = connection
+
+	return nil
+}
+
+func NewPool(plcConStr string) (Pool, error) {
+	// Create a new instance of the PlcDriverManager
+	driverManager := plc4go.NewPlcDriverManager()
+
+	// Register the Transports
+	transports.RegisterTcpTransport(driverManager)
+	transports.RegisterUdpTransport(driverManager)
+
+	// Register the Drivers
+	drivers.RegisterS7Driver(driverManager)
+
+	// Get a connection to a remote PLC
+	connectionRequestChanel := driverManager.GetConnection(plcConStr)
+
+	// Wait for the driver to connect (or not)
+	connectionResult := <-connectionRequestChanel
+
+	// Check if something went wrong
+	if connectionResult.Err != nil {
+		fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
+		return nil, connectionResult.Err
+	}
+
+	// If all was ok, get the connection instance
+	connection := connectionResult.Connection
+
+	return &DefaultPool{driverManager: driverManager, connectionString: plcConStr, connection: connection}, nil
+}
+
+func (p *DefaultPool) Get() plc4go.PlcConnection {
+	fmt.Println("Connected: ", p.connection.IsConnected())
+	return p.connection
+}
+
+func performRequest(c MQTT.Client, pool Pool, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
+	fmt.Println("Doing a Request now...")
+	var connection plc4go.PlcConnection
+
+	connection = pool.Get()
+
 	// Prepare a read-request
-	readRequest, err := connection.ReadRequestBuilder().
-		AddQuery("motor-current", "%DB444.DBD8:REAL").
-		AddQuery("position", "%DB444.DBD0:REAL").
-		AddQuery("rand_val", "%DB444.DBD4:REAL").
-		Build()
+	builder := connection.ReadRequestBuilder()
+
+	for key, value := range parameters {
+		builder.AddQuery(key, value)
+	}
+
+	readRequest, err := builder.Build()
 	if err != nil {
 		fmt.Printf("error preparing read-request: %s", connectionResult.Err.Error())
 		return
@@ -135,10 +274,8 @@ func readPlc(c MQTT.Client) {
 	}
 
 	// Do something with the response
-	value1 := readRequestResult.Response.GetValue("motor-current")
-	value2 := readRequestResult.Response.GetValue("position")
-	value3 := readRequestResult.Response.GetValue("rand_val")
-	publishMQTT(c, "motor-current", value1.GetString())
-	publishMQTT(c, "position:", value2.GetString())
-	publishMQTT(c, "rand_val", value3.GetString())
+	for key := range parameters {
+		val := readRequestResult.Response.GetValue(key)
+		publishMQTT(c, "motor-current", val.GetString())
+	}
 }
