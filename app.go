@@ -69,10 +69,10 @@ func (L LOGGER) Printf(format string, v ...interface{}) {
 
 func connectMQTT(host string, username string, password string, device string, tenant string) MQTT.Client {
 	// Enable Logging
-	MQTT.ERROR = LOGGER{}
-	MQTT.CRITICAL = LOGGER{}
-	MQTT.WARN = LOGGER{}
-	MQTT.DEBUG = LOGGER{}
+	//MQTT.ERROR = LOGGER{}
+	//MQTT.CRITICAL = LOGGER{}
+	//MQTT.WARN = LOGGER{}
+	//MQTT.DEBUG = LOGGER{}
 
 	//create a ClientOptions struct setting the broker address, clientid, turn
 	//off trace output and set the default message handler
@@ -114,9 +114,10 @@ func disconnectMQTT(c MQTT.Client, device string, tenant string) {
 }
 
 func publishMQTT(c MQTT.Client, label string, value string) {
-	text := fmt.Sprintf("key: %s, value: %s", label, value)
-	token := c.Publish(fmt.Sprintf("telemetry/%s", getenv("TENANT", "")), 0, false, text)
+	text := fmt.Sprintf("{\"%s\": %s}", label, value)
+	token := c.Publish("telemetry", 0, false, text)
 	token.Wait()
+	fmt.Println("Sent a message")
 }
 
 func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT.Client) {
