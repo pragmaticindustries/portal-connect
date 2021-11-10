@@ -60,6 +60,12 @@ func connectMQTT(host string, username string, password string) MQTT.Client {
 	clientId := "portal-connect-" + strconv.Itoa(rand.Int())
 	fmt.Println("Client ID:", clientId)
 	opts.SetClientID(clientId)
+	opts := MQTT.NewClientOptions().AddBroker("tcp://85.215.240.139:1883")
+	opts.SetClientID("portal-connect")
+	provider := MQTT.CredentialsProvider("ff77512b-d1aa-42fa-bf7e-fac1f4051838@31f18a77-2466-460c-8da8-5fadd658ca74","")
+	opts.SetCredentialsProvider(provider)
+	opts.SetUsername("ff77512b-d1aa-42fa-bf7e-fac1f4051838@31f18a77-2466-460c-8da8-5fadd658ca74")
+	opts.SetPassword("")
 	opts.SetDefaultPublishHandler(f)
 
 	if username != "" {
@@ -75,7 +81,7 @@ func connectMQTT(host string, username string, password string) MQTT.Client {
 
 	//subscribe to the topic /portal-test/sample and request messages to be delivered
 	//at a maximum qos of zero, wait for the receipt to confirm the subscription
-	if token := c.Subscribe("portal-test/sample", 0, nil); token.Wait() && token.Error() != nil {
+	if token := c.Subscribe("command/31f18a77-2466-460c-8da8-5fadd658ca74/ff77512b-d1aa-42fa-bf7e-fac1f4051838/req/#", 0, nil); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
@@ -85,7 +91,7 @@ func connectMQTT(host string, username string, password string) MQTT.Client {
 
 func disconnectMQTT(c MQTT.Client) {
 	//unsubscribe from /portal-test/sample
-	if token := c.Unsubscribe("portal-test/sample"); token.Wait() && token.Error() != nil {
+	if token := c.Unsubscribe("command/31f18a77-2466-460c-8da8-5fadd658ca74/ff77512b-d1aa-42fa-bf7e-fac1f4051838/req/#"); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 		os.Exit(1)
 	}
@@ -94,7 +100,7 @@ func disconnectMQTT(c MQTT.Client) {
 
 func publishMQTT(c MQTT.Client, label string, value string) {
 	text := fmt.Sprintf("key: %s, value: %s", label, value)
-	token := c.Publish("portal-test/sample", 0, false, text)
+	token := c.Publish("telemetry", 0, false, text)
 	token.Wait()
 }
 
