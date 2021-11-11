@@ -253,7 +253,7 @@ func performRequest(c MQTT.Client, pool Pool, parameters map[string]string) {
 	result := make(map[string]interface{})
 	for key := range parameters {
 		val := readRequestResult.Response.GetValue(key)
-		result[key] = val
+		result[key] = val.GetString()
 	}
 
 	publishMapMQTT(c, result)
