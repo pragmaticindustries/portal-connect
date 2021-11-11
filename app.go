@@ -98,6 +98,13 @@ func publishMQTT(c MQTT.Client, label string, value string) {
 	token.Wait()
 }
 
+func publishMapMQTT(c MQTT.Client, values map[string]interface{}) {
+	jsonString, _ := json.Marshal(values)
+	fmt.Println("Sending", jsonString)
+	token := c.Publish("portal-test/sample", 0, false, jsonString)
+	token.Wait()
+}
+
 func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT.Client) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
@@ -242,9 +249,12 @@ func performRequest(c MQTT.Client, pool Pool, parameters map[string]string) {
 		return
 	}
 
-	// Do something with the response
+	// ...
+	result := make(map[string]interface{})
 	for key := range parameters {
 		val := readRequestResult.Response.GetValue(key)
-		publishMQTT(c, "motor-current", val.GetString())
+		result[key] = val
 	}
+
+	publishMapMQTT(c, result)
 }
