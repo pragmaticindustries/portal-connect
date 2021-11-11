@@ -159,8 +159,16 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 	// DO a regular reconnect
 	_, err = s.Every(1).Minutes().Do(performReconnect, p)
 
+	// Close the App
+	_, err = s.Every(10).Minutes().Do(closeApp)
+
 	// Run the main "event loop"
 	s.StartBlocking()
+}
+
+func closeApp() {
+	fmt.Println("Force Close...")
+	os.Exit(1)
 }
 
 func performReconnect(p Pool) {
