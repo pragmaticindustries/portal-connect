@@ -102,56 +102,12 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-	// Create a new instance of the PlcDriverManager
-	driverManager := plc4go.NewPlcDriverManager()
-
-	// Register the Transports
-	transports.RegisterTcpTransport(driverManager)
-	transports.RegisterUdpTransport(driverManager)
-
-	// Register the Drivers
-	drivers.RegisterS7Driver(driverManager)
-
-	// Get a connection to a remote PLC
-	connectionRequestChanel := driverManager.GetConnection(plcConStr)
-
-	// Wait for the driver to connect (or not)
-	connectionResult := <-connectionRequestChanel
-
-	// Check if something went wrong
-	if connectionResult.Err != nil {
-		fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
-		return
-	}
-
-	// If all was ok, get the connection instance
-	connection := connectionResult.Connection
-
-	// Make sure the connection is closed at the end
-	defer connection.Close()
-
-	// Try to ping the remote device
-	pingResultChannel := connection.Ping()
-
-	// Wait for the Ping operation to finsh
-	pingResult := <-pingResultChannel
-	if pingResult.Err != nil {
-		fmt.Printf("Couldn't ping device: %s", pingResult.Err.Error())
-		return
-	}
-
-	if !connection.GetMetadata().CanRead() {
-		fmt.Printf("This connection doesn't support read operations")
-		return
-	}
-
 	s := gocron.NewScheduler(time.UTC)
 
 	p, _ := NewPool(plcConStr)
 
 	// Schedule the Event
-	_, err := s.Every(seconds).Seconds().Do(performRequest, c, p, parameters, connectionResult)
+	_, err := s.Every(seconds).Seconds().SingletonMode().Do(performRequest, c, p, parameters)
 	if err != nil {
 		return
 	}
@@ -160,7 +116,7 @@ func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT
 	//_, err = s.Every(1).Minutes().Do(performReconnect, p)
 
 	// Close the App
-	_, err = s.Every(10).Minutes().Do(closeApp)
+	_, err = s.Every(10).Minutes().WaitForSchedule().Do(closeApp)
 
 	// Run the main "event loop"
 	s.StartBlocking()
@@ -182,9 +138,10 @@ func performReconnect(p Pool) {
 
 type DefaultPool struct {
 	Pool
-	connectionString string
-	driverManager    plc4go.PlcDriverManager
-	connection       plc4go.PlcConnection
+	connectionString  string
+	driverManager     plc4go.PlcDriverManager
+	connectionChannel <-chan plc4go.PlcConnection
+	connection        plc4go.PlcConnection
 }
 
 type Pool interface {
@@ -222,37 +179,42 @@ func NewPool(plcConStr string) (Pool, error) {
 	// Create a new instance of the PlcDriverManager
 	driverManager := plc4go.NewPlcDriverManager()
 
-	// Register the Transports
-	transports.RegisterTcpTransport(driverManager)
-	transports.RegisterUdpTransport(driverManager)
+	connectionChannel := make(chan plc4go.PlcConnection)
 
-	// Register the Drivers
-	drivers.RegisterS7Driver(driverManager)
+	go func() {
+		// Register the Transports
+		transports.RegisterTcpTransport(driverManager)
+		transports.RegisterUdpTransport(driverManager)
 
-	// Get a connection to a remote PLC
-	connectionRequestChanel := driverManager.GetConnection(plcConStr)
+		// Register the Drivers
+		drivers.RegisterS7Driver(driverManager)
 
-	// Wait for the driver to connect (or not)
-	connectionResult := <-connectionRequestChanel
+		// Get a connection to a remote PLC
+		connectionRequestChanel := driverManager.GetConnection(plcConStr)
 
-	// Check if something went wrong
-	if connectionResult.Err != nil {
-		fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
-		return nil, connectionResult.Err
-	}
+		// Wait for the driver to connect (or not)
+		connectionResult := <-connectionRequestChanel
 
-	// If all was ok, get the connection instance
-	connection := connectionResult.Connection
+		// Check if something went wrong
+		if connectionResult.Err != nil {
+			fmt.Printf("Error connecting to PLC: %s", connectionResult.Err.Error())
+		} else {
+			connectionChannel <- connectionResult.Connection
+		}
+	}()
 
-	return &DefaultPool{driverManager: driverManager, connectionString: plcConStr, connection: connection}, nil
+	return &DefaultPool{driverManager: driverManager, connectionString: plcConStr, connection: nil, connectionChannel: connectionChannel}, nil
 }
 
 func (p *DefaultPool) Get() plc4go.PlcConnection {
-	fmt.Println("Connected: ", p.connection.IsConnected())
+	if p.connection == nil {
+		conn := <-p.connectionChannel
+		p.connection = conn
+	}
 	return p.connection
 }
 
-func performRequest(c MQTT.Client, pool Pool, parameters map[string]string, connectionResult plc4go.PlcConnectionConnectResult) {
+func performRequest(c MQTT.Client, pool Pool, parameters map[string]string) {
 	fmt.Println("Doing a Request now...")
 	var connection plc4go.PlcConnection
 
@@ -267,7 +229,6 @@ func performRequest(c MQTT.Client, pool Pool, parameters map[string]string, conn
 
 	readRequest, err := builder.Build()
 	if err != nil {
-		fmt.Printf("error preparing read-request: %s", connectionResult.Err.Error())
 		return
 	}
 
