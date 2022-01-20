@@ -11,6 +11,7 @@ import (
 	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
@@ -54,6 +55,17 @@ func printMetrics() {
 	// sb := string(body)
 	sb := string(body)
 	// fmt.Println(sb)
+
+	tmp := strings.Split(sb, "\n")
+
+	for _, line := range tmp {
+		if !strings.HasPrefix(line, "#") {
+			items := strings.Split(line, " ")
+			if len(items) == 2 {
+				c.Publish("portal-test/metric/"+items[0], 0, false, items[1])
+			}
+		}
+	}
 
 	c.Publish("portal-test/metrics", 0, false, sb)
 
