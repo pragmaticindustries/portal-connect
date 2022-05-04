@@ -1,10 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/common/expfmt"
+	"io/ioutil"
+	"log"
 	"math/rand"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/apache/plc4x/plc4go/pkg/plc4go"
@@ -26,6 +33,62 @@ func getenv(key, fallback string) string {
 	return value
 }
 
+func printMetrics() {
+	log.Println("Sending Metrics via MQTT")
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		// return err
+	}
+	buf := &bytes.Buffer{}
+	enc := expfmt.NewEncoder(buf, expfmt.FmtText)
+	// Check for pre-existing grouping labels:
+	for _, mf := range mfs {
+		enc.Encode(mf)
+	}
+
+	//We Read the response body on the line below.
+	body, err_ := ioutil.ReadAll(buf)
+	if err_ != nil {
+		log.Fatalln(err_)
+	}
+	//Convert the body to type string
+	// sb := string(body)
+	sb := string(body)
+	// fmt.Println(sb)
+
+	tmp := strings.Split(sb, "\n")
+
+	for _, line := range tmp {
+		if !strings.HasPrefix(line, "#") {
+			items := strings.Split(line, " ")
+			if len(items) == 2 {
+				c.Publish("portal-test/metric/"+items[0], 0, false, items[1])
+			}
+		}
+	}
+
+	c.Publish("portal-test/metrics", 0, false, sb)
+
+	log.Println("Finished sending Metrics via MQTT")
+}
+
+var (
+	// Scheduler
+	s = gocron.NewScheduler(time.UTC)
+	// ...
+	c MQTT.Client
+	// Metrics
+	mqttConnections = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mqtt_connections_created",
+		Help: "Number of mqtt connections made",
+	})
+	plcRequests = promauto.NewCounter(prometheus.CounterOpts{
+		Name:        "plc_requests_sent",
+		Help:        "Number PLC Requests",
+		ConstLabels: map[string]string{"a": "b"},
+	})
+)
+
 func main() {
 	// PLC connection string
 	var plcConStr = getenv("PLC_ADDRESS", "s7://192.168.167.210/0/0")
@@ -42,9 +105,16 @@ func main() {
 		return
 	}
 
-	c := connectMQTT(host, username, password)
+	c = connectMQTT(host, username, password)
 	defer disconnectMQTT(c)
-	readPlc(plcConStr, frequencySeconds, parameters, c)
+
+	// Start Prometheus
+	_, err = s.Every(30).Seconds().Do(printMetrics)
+	if err != nil {
+		return
+	}
+
+	readPlc(plcConStr, frequencySeconds, parameters)
 }
 
 //define a function for the default message handler
@@ -72,6 +142,8 @@ func connectMQTT(host string, username string, password string) MQTT.Client {
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
+
+	mqttConnections.Inc()
 
 	//subscribe to the topic /portal-test/sample and request messages to be delivered
 	//at a maximum qos of zero, wait for the receipt to confirm the subscription
@@ -105,11 +177,10 @@ func publishMapMQTT(c MQTT.Client, values map[string]interface{}) {
 	token.Wait()
 }
 
-func readPlc(plcConStr string, seconds int, parameters map[string]string, c MQTT.Client) {
+func readPlc(plcConStr string, seconds int, parameters map[string]string) {
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	// Follow this: http://plc4x.apache.org/users/getting-started/plc4go.html
 	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-	s := gocron.NewScheduler(time.UTC)
 
 	p, _ := NewPool(plcConStr)
 
@@ -223,6 +294,8 @@ func (p *DefaultPool) Get() plc4go.PlcConnection {
 
 func performRequest(c MQTT.Client, pool Pool, parameters map[string]string) {
 	fmt.Println("Doing a Request now...")
+	plcRequests.Inc()
+
 	var connection plc4go.PlcConnection
 
 	connection = pool.Get()
